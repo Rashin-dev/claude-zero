@@ -192,14 +192,36 @@ export const streamChat = action({
       }
     }
 
-    const contents = context.messages
-      .filter(
-        (m) => m._id !== assistantMessageId && m.content.trim().length > 0,
-      )
-      .map((m) => ({
-        role: m.role === "user" ? ("user" as const) : ("model" as const),
-        parts: [{ text: m.content }],
-      }));
+    // Keep the conversation inside the free tier's context window (and fast):
+    // send the most recent history, newest-first, up to a character budget.
+    // The last message is always kept, even if it's huge on its own.
+    const MAX_HISTORY_CHARS = 120_000;
+    const history = context.messages.filter(
+      (m) => m._id !== assistantMessageId && m.content.trim().length > 0,
+    );
+    const contents: Array<{
+      role: "user" | "model";
+      parts: Array<{ text: string }>;
+    }> = [];
+    let used = 0;
+    let trimmed = false;
+    for (let i = history.length - 1; i >= 0; i--) {
+      const message = history[i];
+      const size = message.content.length;
+      if (contents.length > 0 && used + size > MAX_HISTORY_CHARS) {
+        trimmed = true;
+        break;
+      }
+      used += size;
+      contents.unshift({
+        role: message.role === "user" ? "user" : "model",
+        parts: [{ text: message.content }],
+      });
+    }
+    if (trimmed) {
+      systemInstruction +=
+        "\n\n(Note: the earliest part of this conversation was trimmed to stay within limits. If you need details from it, ask the user.)";
+    }
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 180_000);
@@ -274,7 +296,7 @@ export const streamChat = action({
         parser.push(decoder.decode(value, { stream: true }), (text) => {
           pending += text;
         });
-        if (pending.length >= 96) {
+        if (pending.length >= 240) {
           const keepGoing = await flush();
           if (!keepGoing) {
             await finish();
