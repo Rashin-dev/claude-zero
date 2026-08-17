@@ -45,7 +45,12 @@ const STATUS_META: Record<
 };
 
 /** Canned finding templates per scanner check, so a failed check becomes a
- *  structured finding in one click. */
+ *  structured finding in one click.
+ *
+ *  Header/hardening checks are tagged `ineligible: true`: HackerOne's core
+ *  ineligible list closes them standalone, so they get an explanation note
+ *  instead of a one-click promotion. Only checks with real exploit potential
+ *  (future additions) promote into Findings. */
 const CHECK_TEMPLATES: Record<
   string,
   {
@@ -56,6 +61,8 @@ const CHECK_TEMPLATES: Record<
     impact: string;
     reproduction: string;
     remediation: string;
+    ineligible?: boolean;
+    note?: string;
   }
 > = {
   "Content-Security-Policy": {
@@ -70,6 +77,8 @@ const CHECK_TEMPLATES: Record<
       "Passive check: response headers contain no content-security-policy header.",
     remediation:
       "Serve a strict CSP (start with `default-src 'self'`), test it, and include it on all responses.",
+    ineligible: true,
+    note: "'Content-Security-Policy configuration opinions' are ineligible standalone. Use it only as an amplifier: missing CSP + a confirmed XSS makes that XSS Critical instead of a hard sell.",
   },
   "Strict-Transport-Security": {
     severity: "medium",
@@ -83,6 +92,8 @@ const CHECK_TEMPLATES: Record<
       "Passive check: response headers contain no strict-transport-security header.",
     remediation:
       "Add `Strict-Transport-Security: max-age=63072000; includeSubDomains; preload` and submit the domain to the HSTS preload list.",
+    ineligible: true,
+    note: "'SSL/TLS configurations' are ineligible standalone. Only relevant if you can demonstrate an actual downgrade/MITM scenario with real impact.",
   },
   "Clickjacking protection": {
     severity: "low",
@@ -96,6 +107,8 @@ const CHECK_TEMPLATES: Record<
       "Passive check: no x-frame-options header and no frame-ancestors in CSP.",
     remediation:
       "Set `X-Frame-Options: DENY` (or SAMEORIGIN) and/or `frame-ancestors 'none'` in the CSP.",
+    ineligible: true,
+    note: "'Clickjacking on pages with no sensitive actions' is ineligible. Report only if the page has sensitive actions (payment, account changes, privilege changes) AND you can build a working PoC.",
   },
   "MIME sniffing protection": {
     severity: "low",
@@ -109,6 +122,8 @@ const CHECK_TEMPLATES: Record<
       "Passive check: response headers lack x-content-type-options: nosniff.",
     remediation:
       "Serve `X-Content-Type-Options: nosniff` on all responses.",
+    ineligible: true,
+    note: "'Missing best practices' are ineligible standalone. Only meaningful combined with a real stored-XSS/upload issue.",
   },
   "Referrer-Policy": {
     severity: "low",
@@ -121,6 +136,8 @@ const CHECK_TEMPLATES: Record<
       "Passive check: response headers contain no referrer-policy header.",
     remediation:
       "Set `Referrer-Policy: strict-origin-when-cross-origin` (or `no-referrer` for sensitive apps).",
+    ineligible: true,
+    note: "Optional hardening is ineligible standalone. Only relevant if you can show a token leaking via Referer in a realistic scenario.",
   },
 };
 
@@ -198,8 +215,10 @@ export function ScannerPanel() {
           Fingerprints a target with read-only checks: security headers,
           robots.txt, sitemap. A handful of single requests — nothing that
           looks like an attack. The target must be inside the scope you saved
-          in the Findings tab, or the scan refuses to run. Failed checks
-          promote straight into Findings with one click.
+          in the Findings tab, or the scan refuses to run. Header gaps are
+          observations, not findings: HackerOne's core ineligible list closes
+          them standalone — use them to amplify real vulnerabilities (e.g.
+          missing CSP + confirmed XSS).
         </p>
         <div className="mt-4 flex gap-2">
           <Input
@@ -272,8 +291,14 @@ export function ScannerPanel() {
                     <p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">
                       {check.detail}
                     </p>
+                    {template?.ineligible && (
+                      <p className="mt-1.5 max-w-xl rounded-md border border-muted/70 bg-muted/30 px-2 py-1.5 text-[11px] leading-relaxed text-muted-foreground">
+                        <span className="font-semibold">H1 ineligible standalone —</span>{" "}
+                        {template.note}
+                      </p>
+                    )}
                   </div>
-                  {canPromote && (
+                  {canPromote && !template?.ineligible && (
                     <Button
                       type="button"
                       variant="outline"
