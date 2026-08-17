@@ -17,6 +17,7 @@ export const createConversation = mutation({
     return await ctx.db.insert("conversations", {
       userId: user._id,
       title: DEFAULT_TITLE,
+      mode: "chat",
       createdAt: now,
       updatedAt: now,
     });
@@ -71,8 +72,9 @@ export const sendMessage = mutation({
     conversationId: v.id("conversations"),
     content: v.string(),
     model: v.string(),
+    mode: v.optional(v.string()), // workspace mode: "chat" | "coding" | "bounty"
   },
-  handler: async (ctx, { conversationId, content, model }) => {
+  handler: async (ctx, { conversationId, content, model, mode }) => {
     const user = await getCurrentUser(ctx);
     if (!user) throw new Error("Not signed in");
 
@@ -82,6 +84,9 @@ export const sendMessage = mutation({
     }
 
     const now = Date.now();
+    if (mode && mode !== conversation.mode) {
+      await ctx.db.patch(conversationId, { mode });
+    }
     await ctx.db.insert("messages", {
       conversationId,
       role: "user",
@@ -203,7 +208,7 @@ export const getStreamContext = internalQuery({
       .order("asc")
       .collect();
 
-    return { messages };
+    return { messages, mode: conversation.mode ?? "chat" };
   },
 });
 

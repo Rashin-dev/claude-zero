@@ -1,5 +1,13 @@
 import type { Doc } from "@/convex/_generated/dataModel";
-import { Code2, KeyRound, MessageSquare, Sparkles, Wand2 } from "lucide-react";
+import {
+  Code2,
+  FileSearch,
+  KeyRound,
+  MessageSquare,
+  ShieldAlert,
+  Sparkles,
+  Wand2,
+} from "lucide-react";
 import { useEffect, useRef } from "react";
 import { Markdown } from "./Markdown";
 
@@ -91,12 +99,44 @@ function MessageItem({
   );
 }
 
+const BOUNTY_SUGGESTIONS = [
+  {
+    icon: FileSearch,
+    label: "Review my scope",
+    prompt:
+      "Review my program scope and rules below and tell me what test categories are allowed, what's out of scope, and any automation or rate-limit restrictions I must respect.",
+  },
+  {
+    icon: ShieldAlert,
+    label: "Plan a test",
+    prompt:
+      "Help me plan a non-destructive test for an in-scope endpoint: the smallest manual proof-of-concept that could confirm a vulnerability, without triggering rate limits or alarms.",
+  },
+  {
+    icon: Code2,
+    label: "Structure a finding",
+    prompt:
+      "Help me turn my finding into structured output: title, severity (Critical/High/Medium/Low), P1-P4 priority, CWE, description, impact, reproduction steps, and remediation.",
+  },
+  {
+    icon: KeyRound,
+    label: "Audit rules check",
+    prompt:
+      "List the most common bug bounty rules of engagement and check my program's rules against them so I don't violate anything.",
+  },
+];
+
 interface ChatThreadProps {
   messages: Doc<"messages">[] | undefined;
   onSend: (prompt: string) => void;
+  variant?: "default" | "bounty";
 }
 
-export function ChatThread({ messages, onSend }: ChatThreadProps) {
+export function ChatThread({
+  messages,
+  onSend,
+  variant = "default",
+}: ChatThreadProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
 
@@ -123,32 +163,54 @@ export function ChatThread({ messages, onSend }: ChatThreadProps) {
       {list.length === 0 ? (
         <div className="flex h-full flex-col items-center justify-center px-6 text-center">
           <div className="flex size-12 items-center justify-center rounded-2xl border border-[oklch(0.8_0.11_85/30%)] bg-[oklch(0.8_0.11_85/8%)]">
-            <Sparkles className="size-5 text-[oklch(0.8_0.11_85)]" />
+            {variant === "bounty" ? (
+              <ShieldAlert className="size-5 text-[oklch(0.8_0.11_85)]" />
+            ) : (
+              <Sparkles className="size-5 text-[oklch(0.8_0.11_85)]" />
+            )}
           </div>
-          <h2 className="mt-5 text-xl font-semibold tracking-tight">
-            What are we building?
-          </h2>
-          <p className="mt-2 max-w-sm text-sm leading-relaxed text-muted-foreground">
-            Ask for a script, a full file, a refactor, or an explanation.
-            Answers stream in fast — free tier, no credit card.
-          </p>
+          {variant === "bounty" ? (
+            <>
+              <h2 className="mt-5 text-xl font-semibold tracking-tight">
+                Authorized security testing
+              </h2>
+              <p className="mt-2 max-w-md text-sm leading-relaxed text-muted-foreground">
+                I only work inside the scope and rules you declare in the
+                Findings tab. I'll never suggest evasion, stealth, or
+                out-of-scope attacks — and I'll help you write platform-ready
+                reports.
+              </p>
+            </>
+          ) : (
+            <>
+              <h2 className="mt-5 text-xl font-semibold tracking-tight">
+                What are we building?
+              </h2>
+              <p className="mt-2 max-w-sm text-sm leading-relaxed text-muted-foreground">
+                Ask for a script, a full file, a refactor, or an explanation.
+                Answers stream in fast — free tier, no credit card.
+              </p>
+            </>
+          )}
           <div className="mt-8 grid w-full max-w-2xl gap-3 sm:grid-cols-2">
-            {SUGGESTIONS.map((suggestion) => (
-              <button
-                key={suggestion.label}
-                type="button"
-                onClick={() => onSend(suggestion.prompt)}
-                className="group flex items-start gap-3 rounded-xl border border-border bg-card p-4 text-left transition-all hover:border-[oklch(0.8_0.11_85/40%)] hover:bg-muted/40"
-              >
-                <suggestion.icon className="mt-0.5 size-4 shrink-0 text-[oklch(0.8_0.11_85)]" />
-                <div>
-                  <p className="text-sm font-medium">{suggestion.label}</p>
-                  <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                    {suggestion.prompt}
-                  </p>
-                </div>
-              </button>
-            ))}
+            {(variant === "bounty" ? BOUNTY_SUGGESTIONS : SUGGESTIONS).map(
+              (suggestion) => (
+                <button
+                  key={suggestion.label}
+                  type="button"
+                  onClick={() => onSend(suggestion.prompt)}
+                  className="group flex items-start gap-3 rounded-xl border border-border bg-card p-4 text-left transition-all hover:border-[oklch(0.8_0.11_85/40%)] hover:bg-muted/40"
+                >
+                  <suggestion.icon className="mt-0.5 size-4 shrink-0 text-[oklch(0.8_0.11_85)]" />
+                  <div>
+                    <p className="text-sm font-medium">{suggestion.label}</p>
+                    <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                      {suggestion.prompt}
+                    </p>
+                  </div>
+                </button>
+              ),
+            )}
           </div>
         </div>
       ) : (

@@ -35,11 +35,34 @@ const schema = defineSchema(
     conversations: defineTable({
       userId: v.id("users"),
       title: v.string(),
+      mode: v.optional(v.string()), // "chat" | "coding" | "bounty"
       createdAt: v.number(),
       updatedAt: v.number(),
     })
       .index("by_user", ["userId"])
       .index("by_user_updated", ["userId", "updatedAt"]),
+
+    bountyProfiles: defineTable({
+      userId: v.id("users"),
+      platform: v.string(), // hackerone | bugcrowd | intigriti | custom
+      programName: v.string(),
+      scope: v.string(),
+      rules: v.string(),
+      updatedAt: v.number(),
+    }).index("by_user", ["userId"]),
+
+    bountyFindings: defineTable({
+      userId: v.id("users"),
+      title: v.string(),
+      severity: v.string(), // critical | high | medium | low
+      cwe: v.string(),
+      cvss: v.optional(v.string()),
+      description: v.string(),
+      impact: v.string(),
+      reproduction: v.string(),
+      remediation: v.string(),
+      createdAt: v.number(),
+    }).index("by_user", ["userId"]),
 
     messages: defineTable({
       conversationId: v.id("conversations"),

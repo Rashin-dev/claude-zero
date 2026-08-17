@@ -20,7 +20,24 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { LogOut, MessageSquarePlus, Sparkles, Trash2, Zap } from "lucide-react";
+import {
+  Code2,
+  LogOut,
+  MessageSquare,
+  MessageSquarePlus,
+  ShieldAlert,
+  Sparkles,
+  Trash2,
+  Zap,
+} from "lucide-react";
+
+export type Mode = "chat" | "coding" | "bounty";
+
+export const MODES: { value: Mode; label: string; icon: typeof MessageSquare }[] = [
+  { value: "chat", label: "Chat", icon: MessageSquare },
+  { value: "coding", label: "Coding", icon: Code2 },
+  { value: "bounty", label: "Bug bounty", icon: ShieldAlert },
+];
 
 export const MODELS = [
   { value: "gemini-2.5-flash", label: "2.5 Flash", hint: "Best balance" },
@@ -34,12 +51,14 @@ export const MODELS = [
 interface SidebarProps {
   conversations: Doc<"conversations">[] | undefined;
   selectedId: string | null;
+  mode: Mode;
   model: string;
   userName: string | null;
   userEmail: string | null;
   onSelect: (id: string) => void;
   onNewChat: () => void;
   onDelete: (id: string) => void;
+  onModeChange: (mode: Mode) => void;
   onModelChange: (model: string) => void;
   onSignOut: () => void;
 }
@@ -55,12 +74,14 @@ function initials(name: string | null, email: string | null) {
 export function Sidebar({
   conversations,
   selectedId,
+  mode,
   model,
   userName,
   userEmail,
   onSelect,
   onNewChat,
   onDelete,
+  onModeChange,
   onModelChange,
   onSignOut,
 }: SidebarProps) {
@@ -74,6 +95,32 @@ export function Sidebar({
         <div>
           <p className="text-[15px] font-semibold tracking-tight">Mythos</p>
           <p className="text-[11px] text-muted-foreground">coding agent</p>
+        </div>
+      </div>
+
+      {/* Mode switcher */}
+      <div className="px-3 pb-3">
+        <div className="flex rounded-lg border border-sidebar-border bg-background/40 p-0.5">
+          {MODES.map((m) => {
+            const active = mode === m.value;
+            return (
+              <button
+                key={m.value}
+                type="button"
+                onClick={() => onModeChange(m.value)}
+                className={cn(
+                  "flex flex-1 items-center justify-center gap-1.5 rounded-md px-1.5 py-1.5 text-[11.5px] font-medium transition-colors",
+                  active
+                    ? "bg-card text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+                title={`${m.label} mode`}
+              >
+                <m.icon className="size-3.5" />
+                <span className="hidden sm:inline">{m.label}</span>
+              </button>
+            );
+          })}
         </div>
       </div>
 

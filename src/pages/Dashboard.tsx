@@ -1,19 +1,21 @@
+import { BountyWorkspace } from "@/components/bounty/BountyWorkspace";
 import { ChatThread } from "@/components/chat/ChatThread";
 import { Composer } from "@/components/chat/Composer";
-import { MODELS, Sidebar } from "@/components/chat/Sidebar";
+import { MODELS, Sidebar, type Mode } from "@/components/chat/Sidebar";
 import { Button } from "@/components/ui/button";
 import { api } from "@/convex/_generated/api";
+import type { Id } from "@/convex/_generated/dataModel";
 import { useAuth } from "@/hooks/use-auth";
 import { cn } from "@/lib/utils";
 import { useAction, useMutation, useQuery } from "convex/react";
-import type { Id } from "@/convex/_generated/dataModel";
-import { Menu, Sparkles } from "lucide-react";
+import { Menu, ShieldAlert, Sparkles } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
 
 const LAST_CONVERSATION_KEY = "mythos-last-conversation";
 const MODEL_KEY = "mythos-model";
+const MODE_KEY = "mythos-mode";
 
 function readStorage(key: string): string | null {
   try {
@@ -31,6 +33,11 @@ function writeStorage(key: string, value: string) {
   }
 }
 
+function initialMode(): Mode {
+  const saved = readStorage(MODE_KEY);
+  return saved === "coding" || saved === "bounty" ? saved : "chat";
+}
+
 export default function Dashboard() {
   const { user, signOut } = useAuth();
   const navigate = useNavigate();
@@ -42,6 +49,7 @@ export default function Dashboard() {
   const stopGeneration = useMutation(api.chat.stopGeneration);
   const streamChat = useAction(api.gemini.streamChat);
 
+  const [mode, setMode] = useState<Mode>(initialMode);
   const [selectedId, setSelectedId] = useState<Id<"conversations"> | null>(
     () => {
       const saved = readStorage(LAST_CONVERSATION_KEY);
@@ -77,6 +85,18 @@ export default function Dashboard() {
   }, [conversations, selectedId]);
 
   const handleNewChat = useCallback(() => {
+    setSelectedId(null);
+    try {
+      localStorage.removeItem(LAST_CONVERSATION_KEY);
+    } catch {
+      // ignore
+    }
+    setSidebarOpen(false);
+  }, []);
+
+  const handleModeChange = useCallback((next: Mode) => {
+    setMode(next);
+    writeStorage(MODE_KEY, next);
     setSelectedId(null);
     try {
       localStorage.removeItem(LAST_CONVERSATION_KEY);
@@ -142,6 +162,7 @@ export default function Dashboard() {
           conversationId,
           content: trimmed,
           model,
+          mode,
         });
         // Errors surface on the assistant message via finishMessage.
         void streamChat({
@@ -158,7 +179,7 @@ export default function Dashboard() {
         setBusy(false);
       }
     },
-    [selectedId, model, streaming, createConversation, sendMessage, streamChat],
+    [selectedId, model, mode, streaming, createConversation, sendMessage, streamChat],
   );
 
   const handleSignOut = useCallback(async () => {
@@ -167,7 +188,8 @@ export default function Dashboard() {
   }, [signOut, navigate]);
 
   const title =
-    conversations?.find((c) => c._id === selectedId)?.title ?? "New chat";
+    conversations?.find((c) => c._id === selectedId)?.title ??
+    (mode === "bounty" ? "Bug bounty" : "New chat");
 
   return (
     <div className="flex h-dvh overflow-hidden bg-background text-foreground">
@@ -189,12 +211,14 @@ export default function Dashboard() {
         <Sidebar
           conversations={conversations}
           selectedId={selectedId}
+          mode={mode}
           model={model}
           userName={user?.name ?? null}
           userEmail={user?.email ?? null}
           onSelect={handleSelect}
           onNewChat={handleNewChat}
           onDelete={handleDelete}
+          onModeChange={handleModeChange}
           onModelChange={(value) => {
             setModel(value);
             writeStorage(MODEL_KEY, value);
@@ -216,6 +240,9 @@ export default function Dashboard() {
           >
             <Menu className="size-5" />
           </Button>
+          {mode === "bounty" && (
+            <ShieldAlert className="size-4 shrink-0 text-[oklch(0.8_0.11_85)]" />
+          )}
           <h1 className="min-w-0 truncate text-sm font-medium">{title}</h1>
           {streaming && (
             <span className="flex shrink-0 items-center gap-1.5 rounded-full border border-[oklch(0.8_0.11_85/30%)] bg-[oklch(0.8_0.11_85/8%)] px-2.5 py-0.5 text-[11px] text-[oklch(0.8_0.11_85)]">
@@ -236,14 +263,25 @@ export default function Dashboard() {
           </div>
         </header>
 
-        <ChatThread messages={messages} onSend={handleSend} />
-
-        <Composer
-          streaming={streaming}
-          busy={busy}
-          onSend={handleSend}
-          onStop={handleStop}
-        />
+        {mode === "bounty" ? (
+          <BountyWorkspace
+            messages={messages}
+            streaming={streaming}
+            busy={busy}
+            onSend={handleSend}
+            onStop={handleStop}
+          />
+        ) : (
+          <>
+            <ChatThread messages={messages} onSend={handleSend} />
+            <Composer
+              streaming={streaming}
+              busy={busy}
+              onSend={handleSend}
+              onStop={handleStop}
+            />
+          </>
+        )}
       </div>
     </div>
   );

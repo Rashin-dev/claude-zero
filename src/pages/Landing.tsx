@@ -116,8 +116,8 @@ const features = [
   },
   {
     icon: MessageSquare,
-    title: "Real conversations",
-    body: "Threads keep full context, so you can iterate: fix this, explain that, now make it faster.",
+    title: "Three workspaces",
+    body: "Chat, coding, and a dedicated bug bounty mode with program scope, findings, and report generation — all in one agent.",
   },
   {
     icon: History,
@@ -216,9 +216,10 @@ export default function Landing() {
             <span className="mythos-shimmer">Built for zero cost.</span>
           </h1>
           <p className="mx-auto mt-6 max-w-xl text-base leading-relaxed text-muted-foreground sm:text-lg">
-            Mythos is a blazing-fast coding agent that runs on Gemini's free
-            tier. Streamed answers, full code files, saved conversations — no
-            subscription, no credit card, no surprises.
+            Mythos is a blazing-fast agent with three workspaces — chat, coding,
+            and bug bounty — running on Gemini's free tier. Streamed answers,
+            full code files, saved conversations, platform-ready security
+            reports. No subscription, no credit card, no surprises.
           </p>
           <div className="mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row">
             <Button
