@@ -6,14 +6,19 @@ import { getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
 
 /**
- * Zero-cost, blazing-fast model access.
+ * Zero-cost, blazing-fast model access that never stops.
  *
  * Primary: Google AI Studio (Gemini) — free tier, no credit card, thousands
- * of requests/day. Fallback: Groq — also free tier, blazing fast, used
- * automatically when Gemini is rate-limited or down, or when only the Groq
- * key is configured.
+ * of requests/day. Fallback: Groq — also free tier, used automatically when
+ * Gemini is rate-limited or down.
  *
- * Set keys in the Keys/API keys UI as: GOOGLE_API_KEY, GROQ_API_KEY
+ * NEVER LOSE RHYTHM: add numbered copies of any key (GOOGLE_API_KEY_2,
+ * GROQ_API_KEY_3, ...) and Mythos rotates through every key with increasing
+ * retry delays (1s, 2s, 4s, 8s, ... up to 10 attempts) — when one account
+ * hits its free-tier limit, the next key takes over mid-conversation.
+ *
+ * Set keys in the Keys/API keys UI as: GOOGLE_API_KEY, GOOGLE_API_KEY_2, ...,
+ * GROQ_API_KEY, GROQ_API_KEY_2, ...
  */
 
 export const ALLOWED_MODELS = [
@@ -88,6 +93,20 @@ type StreamSource = {
   reader: ReadableStreamDefaultReader<Uint8Array>;
   extract: (json: Record<string, unknown>) => string | undefined;
 };
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/** Collect a primary env key plus numbered copies (GOOGLE_API_KEY_2, ...). */
+function getEnvKeys(prefix: string): string[] {
+  const keys: string[] = [];
+  const primary = process.env[prefix];
+  if (primary) keys.push(primary);
+  for (let i = 2; i <= 10; i++) {
+    const extra = process.env[`${prefix}_${i}`];
+    if (extra) keys.push(extra);
+  }
+  return keys;
+}
 
 /** Minimal incremental SSE parser; the extractor maps provider JSON -> text. */
 function createSseParser(
@@ -274,11 +293,11 @@ export const streamChat = action({
       return;
     }
 
-    const geminiKey = process.env.GOOGLE_API_KEY;
-    const groqKey = process.env.GROQ_API_KEY;
-    if (!geminiKey && !groqKey) {
+    const geminiKeys = getEnvKeys("GOOGLE_API_KEY");
+    const groqKeys = getEnvKeys("GROQ_API_KEY");
+    if (geminiKeys.length === 0 && groqKeys.length === 0) {
       await finish(
-        "No API key configured. Add GOOGLE_API_KEY (Gemini, free tier) in the Keys/API keys tab. You can also add GROQ_API_KEY as an automatic free fallback.",
+        "No API key configured. Add GOOGLE_API_KEY (Gemini) or GROQ_API_KEY (Groq) in the Keys/API keys tab. You can add numbered copies (GOOGLE_API_KEY_2, GROQ_API_KEY_2, …) and Mythos automatically rotates between them when one hits its free-tier limit.",
       );
       return;
     }
@@ -373,65 +392,62 @@ export const streamChat = action({
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 180_000);
 
-    // Pick a provider: Gemini first; Groq free tier as automatic fallback.
+    // Rotation + retry: try every key (Gemini keys first, then Groq keys),
+    // up to 10 attempts, waiting longer between each attempt (1s, 2s, 4s,
+    // 8s, capped). When one account hits its free-tier limit, the next key
+    // takes over without breaking the conversation.
+    const candidates: Array<{ provider: "gemini" | "groq"; key: string }> = [
+      ...geminiKeys.map((key) => ({ provider: "gemini" as const, key })),
+      ...groqKeys.map((key) => ({ provider: "groq" as const, key })),
+    ];
+
+    const MAX_ATTEMPTS = 10;
     let source: StreamSource | null = null;
     let servedModel = model;
+    let lastError = "";
 
-    if (geminiKey) {
-      const primary = await openGeminiStream(
-        model,
-        contents,
-        systemInstruction,
-        geminiKey,
-        controller.signal,
-      );
-      if (primary.ok) {
-        source = primary.source;
-      } else if (groqKey) {
-        const fallbackModel = GROQ_FALLBACK[model] ?? "llama-3.3-70b-versatile";
-        const fallback = await openGroqStream(
-          fallbackModel,
-          messages,
-          groqKey,
+    for (let attempt = 0; attempt < MAX_ATTEMPTS && !source; attempt++) {
+      const candidate = candidates[attempt % candidates.length];
+      if (candidate.provider === "gemini") {
+        const res = await openGeminiStream(
+          model,
+          contents,
+          systemInstruction,
+          candidate.key,
           controller.signal,
         );
-        if (fallback.ok) {
-          source = fallback.source;
-          servedModel = `groq/${fallbackModel}`;
+        if (res.ok) {
+          source = res.source;
         } else {
-          clearTimeout(timeout);
-          await finish(
-            `Gemini failed (${primary.error}) and the Groq fallback failed too (${fallback.error}).`,
-          );
-          return;
+          lastError = res.error;
         }
       } else {
-        clearTimeout(timeout);
-        await finish(
-          `Gemini error (${primary.error}). Add GROQ_API_KEY in the Keys/API keys tab to enable automatic free-tier fallback.`,
+        const fallbackModel =
+          GROQ_FALLBACK[model] ?? "llama-3.3-70b-versatile";
+        const res = await openGroqStream(
+          fallbackModel,
+          messages,
+          candidate.key,
+          controller.signal,
         );
-        return;
+        if (res.ok) {
+          source = res.source;
+          servedModel = `groq/${fallbackModel}`;
+        } else {
+          lastError = res.error;
+        }
       }
-    } else if (groqKey) {
-      const fallbackModel = GROQ_FALLBACK[model] ?? "llama-3.3-70b-versatile";
-      const attempt = await openGroqStream(
-        fallbackModel,
-        messages,
-        groqKey,
-        controller.signal,
-      );
-      if (!attempt.ok) {
-        clearTimeout(timeout);
-        await finish(`Groq error (${attempt.error}).`);
-        return;
+      if (!source && attempt < MAX_ATTEMPTS - 1) {
+        // Exponential backoff: each retry waits longer than the last.
+        await sleep(Math.min(1000 * 2 ** attempt, 8000));
       }
-      source = attempt.source;
-      servedModel = `groq/${fallbackModel}`;
     }
+    clearTimeout(timeout);
 
     if (!source) {
-      clearTimeout(timeout);
-      await finish("No model provider available.");
+      await finish(
+        `All model providers failed after ${MAX_ATTEMPTS} retries (each retry waited longer). Last error: ${lastError}. If you hit a free-tier daily limit, add another key (e.g. GOOGLE_API_KEY_2 or GROQ_API_KEY_2) in the Keys tab and send "continue" — your conversation is saved and resumes exactly where it stopped.`,
+      );
       return;
     }
 
