@@ -6,10 +6,14 @@ import { getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
 
 /**
- * Zero-cost, blazing-fast model access via Google AI Studio (Gemini).
- * The free tier needs no credit card and gives thousands of requests/day.
+ * Zero-cost, blazing-fast model access.
  *
- * Set the API key in the Keys/API keys UI as: GOOGLE_API_KEY
+ * Primary: Google AI Studio (Gemini) — free tier, no credit card, thousands
+ * of requests/day. Fallback: Groq — also free tier, blazing fast, used
+ * automatically when Gemini is rate-limited or down, or when only the Groq
+ * key is configured.
+ *
+ * Set keys in the Keys/API keys UI as: GOOGLE_API_KEY, GROQ_API_KEY
  */
 
 export const ALLOWED_MODELS = [
@@ -18,6 +22,13 @@ export const ALLOWED_MODELS = [
 ] as const;
 
 const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta";
+const GROQ_BASE = "https://api.groq.com/openai/v1";
+
+// Gemini model -> Groq free-tier fallback model.
+const GROQ_FALLBACK: Record<string, string> = {
+  "gemini-2.5-flash": "llama-3.3-70b-versatile",
+  "gemini-2.5-flash-lite": "llama-3.1-8b-instant",
+};
 
 const CODING_PROMPT = `You are Mythos, a fast, precise coding agent.
 Rules you must follow:
@@ -63,8 +74,25 @@ const SYSTEM_PROMPTS: Record<string, string> = {
   bounty: BOUNTY_PROMPT,
 };
 
-/** Minimal incremental SSE parser for Gemini's streaming generateContent. */
-function createSseParser() {
+type GeminiContent = {
+  role: "user" | "model";
+  parts: Array<{ text: string }>;
+};
+
+type ChatMessage = {
+  role: "system" | "user" | "assistant";
+  content: string;
+};
+
+type StreamSource = {
+  reader: ReadableStreamDefaultReader<Uint8Array>;
+  extract: (json: Record<string, unknown>) => string | undefined;
+};
+
+/** Minimal incremental SSE parser; the extractor maps provider JSON -> text. */
+function createSseParser(
+  extract: (json: Record<string, unknown>) => string | undefined,
+) {
   let buffer = "";
   const onEvent = (line: string): string => {
     const trimmed = line.trim();
@@ -72,15 +100,9 @@ function createSseParser() {
     const payload = trimmed.slice(5).trim();
     if (!payload || payload === "[DONE]") return "";
     try {
-      const json = JSON.parse(payload);
-      const parts: Array<{ text?: string }> | undefined =
-        json?.candidates?.[0]?.content?.parts;
-      if (!Array.isArray(parts)) return "";
-      let text = "";
-      for (const part of parts) {
-        if (typeof part?.text === "string") text += part.text;
-      }
-      return text;
+      const json = JSON.parse(payload) as Record<string, unknown>;
+      const text = extract(json);
+      return typeof text === "string" ? text : "";
     } catch {
       return "";
     }
@@ -104,6 +126,124 @@ function createSseParser() {
   };
 }
 
+function geminiExtract(json: Record<string, unknown>): string | undefined {
+  const candidates = json.candidates;
+  if (!Array.isArray(candidates)) return undefined;
+  const first = candidates[0] as {
+    content?: { parts?: Array<{ text?: string }> };
+  };
+  const parts = first?.content?.parts;
+  if (!Array.isArray(parts)) return undefined;
+  let text = "";
+  for (const part of parts) {
+    if (typeof part?.text === "string") text += part.text;
+  }
+  return text || undefined;
+}
+
+function groqExtract(json: Record<string, unknown>): string | undefined {
+  const choices = json.choices;
+  if (!Array.isArray(choices)) return undefined;
+  const delta = (choices[0] as { delta?: { content?: string } })?.delta?.content;
+  return typeof delta === "string" ? delta || undefined : undefined;
+}
+
+type OpenResult =
+  | { ok: true; source: StreamSource }
+  | { ok: false; error: string };
+
+async function openGeminiStream(
+  model: string,
+  contents: GeminiContent[],
+  systemInstruction: string,
+  key: string,
+  signal: AbortSignal,
+): Promise<OpenResult> {
+  let response: Response;
+  try {
+    response = await fetch(
+      `${GEMINI_BASE}/models/${model}:generateContent?alt=sse&key=${encodeURIComponent(key)}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents,
+          systemInstruction: { parts: [{ text: systemInstruction }] },
+          generationConfig: {
+            temperature: 0.4,
+            maxOutputTokens: 8192,
+          },
+        }),
+        signal,
+      },
+    );
+  } catch (error) {
+    return {
+      ok: false,
+      error: `network error (${error instanceof Error ? error.message : "unknown"})`,
+    };
+  }
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    const reason =
+      response.status === 429
+        ? "rate limit reached (free-tier daily quota)"
+        : response.status === 400 && detail.includes("API key")
+          ? "API key rejected"
+          : detail.slice(0, 200) || `HTTP ${response.status}`;
+    return { ok: false, error: `HTTP ${response.status}: ${reason}` };
+  }
+  if (!response.body) return { ok: false, error: "empty response body" };
+  return {
+    ok: true,
+    source: { reader: response.body.getReader(), extract: geminiExtract },
+  };
+}
+
+async function openGroqStream(
+  model: string,
+  messages: ChatMessage[],
+  key: string,
+  signal: AbortSignal,
+): Promise<OpenResult> {
+  let response: Response;
+  try {
+    response = await fetch(`${GROQ_BASE}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${key}`,
+      },
+      body: JSON.stringify({
+        model,
+        messages,
+        stream: true,
+        temperature: 0.4,
+        max_tokens: 8192,
+      }),
+      signal,
+    });
+  } catch (error) {
+    return {
+      ok: false,
+      error: `network error (${error instanceof Error ? error.message : "unknown"})`,
+    };
+  }
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    const reason =
+      response.status === 429
+        ? "rate limit reached (free-tier quota)"
+        : detail.slice(0, 200) || `HTTP ${response.status}`;
+    return { ok: false, error: `HTTP ${response.status}: ${reason}` };
+  }
+  if (!response.body) return { ok: false, error: "empty response body" };
+  return {
+    ok: true,
+    source: { reader: response.body.getReader(), extract: groqExtract },
+  };
+}
+
 export const streamChat = action({
   args: {
     conversationId: v.id("conversations"),
@@ -111,11 +251,12 @@ export const streamChat = action({
     model: v.string(),
   },
   handler: async (ctx, { conversationId, assistantMessageId, model }) => {
-    const finish = async (error?: string) => {
+    const finish = async (error?: string, servedModel?: string) => {
       try {
         await ctx.runMutation(api.chat.finishMessage, {
           messageId: assistantMessageId,
           error,
+          model: servedModel,
         });
       } catch {
         // best effort — the message otherwise stays in streaming state
@@ -133,10 +274,11 @@ export const streamChat = action({
       return;
     }
 
-    const key = process.env.GOOGLE_API_KEY;
-    if (!key) {
+    const geminiKey = process.env.GOOGLE_API_KEY;
+    const groqKey = process.env.GROQ_API_KEY;
+    if (!geminiKey && !groqKey) {
       await finish(
-        "No Gemini API key configured. Add GOOGLE_API_KEY in the Keys/API keys tab, then try again.",
+        "No API key configured. Add GOOGLE_API_KEY (Gemini, free tier) in the Keys/API keys tab. You can also add GROQ_API_KEY as an automatic free fallback.",
       );
       return;
     }
@@ -199,10 +341,7 @@ export const streamChat = action({
     const history = context.messages.filter(
       (m) => m._id !== assistantMessageId && m.content.trim().length > 0,
     );
-    const contents: Array<{
-      role: "user" | "model";
-      parts: Array<{ text: string }>;
-    }> = [];
+    const contents: GeminiContent[] = [];
     let used = 0;
     let trimmed = false;
     for (let i = history.length - 1; i >= 0; i--) {
@@ -223,50 +362,90 @@ export const streamChat = action({
         "\n\n(Note: the earliest part of this conversation was trimmed to stay within limits. If you need details from it, ask the user.)";
     }
 
+    const messages: ChatMessage[] = [
+      { role: "system", content: systemInstruction },
+      ...contents.map((c) => ({
+        role: c.role === "user" ? ("user" as const) : ("assistant" as const),
+        content: c.parts[0].text,
+      })),
+    ];
+
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 180_000);
 
-    let response: Response;
-    try {
-      response = await fetch(
-        `${GEMINI_BASE}/models/${model}:generateContent?alt=sse&key=${encodeURIComponent(key)}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            contents,
-            systemInstruction: { parts: [{ text: systemInstruction }] },
-            generationConfig: {
-              temperature: 0.4,
-              maxOutputTokens: 8192,
-            },
-          }),
-          signal: controller.signal,
-        },
+    // Pick a provider: Gemini first; Groq free tier as automatic fallback.
+    let source: StreamSource | null = null;
+    let servedModel = model;
+
+    if (geminiKey) {
+      const primary = await openGeminiStream(
+        model,
+        contents,
+        systemInstruction,
+        geminiKey,
+        controller.signal,
       );
-    } catch (error) {
+      if (primary.ok) {
+        source = primary.source;
+      } else if (groqKey) {
+        const fallbackModel = GROQ_FALLBACK[model] ?? "llama-3.3-70b-versatile";
+        const fallback = await openGroqStream(
+          fallbackModel,
+          messages,
+          groqKey,
+          controller.signal,
+        );
+        if (fallback.ok) {
+          source = fallback.source;
+          servedModel = `groq/${fallbackModel}`;
+        } else {
+          clearTimeout(timeout);
+          await finish(
+            `Gemini failed (${primary.error}) and the Groq fallback failed too (${fallback.error}).`,
+          );
+          return;
+        }
+      } else {
+        clearTimeout(timeout);
+        await finish(
+          `Gemini error (${primary.error}). Add GROQ_API_KEY in the Keys/API keys tab to enable automatic free-tier fallback.`,
+        );
+        return;
+      }
+    } else if (groqKey) {
+      const fallbackModel = GROQ_FALLBACK[model] ?? "llama-3.3-70b-versatile";
+      const attempt = await openGroqStream(
+        fallbackModel,
+        messages,
+        groqKey,
+        controller.signal,
+      );
+      if (!attempt.ok) {
+        clearTimeout(timeout);
+        await finish(`Groq error (${attempt.error}).`);
+        return;
+      }
+      source = attempt.source;
+      servedModel = `groq/${fallbackModel}`;
+    }
+
+    if (!source) {
       clearTimeout(timeout);
-      await finish(
-        `Could not reach the Gemini API (${error instanceof Error ? error.message : "network error"}).`,
-      );
-      return;
-    }
-    clearTimeout(timeout);
-
-    if (!response.ok || !response.body) {
-      const detail = await response.text().catch(() => "");
-      const hint = detail.includes("API key")
-        ? "Your Gemini API key looks invalid. Check GOOGLE_API_KEY in the Keys/API keys tab."
-        : detail.includes("not found") || detail.includes("404")
-          ? `Model "${model}" is unavailable. Try a different model in the sidebar.`
-          : "Check the Gemini API status and your key.";
-      await finish(`Model error (${response.status}). ${hint}`);
+      await finish("No model provider available.");
       return;
     }
 
-    const reader = response.body.getReader();
+    // Count this request against the free-tier quota (best effort).
+    try {
+      await ctx.runMutation(api.chat.recordUsage, {
+        date: new Date().toISOString().slice(0, 10),
+      });
+    } catch {
+      // the usage meter is a convenience, not a dependency
+    }
+
     const decoder = new TextDecoder();
-    const parser = createSseParser();
+    const parser = createSseParser(source.extract);
     let pending = "";
     let streamError: string | null = null;
 
@@ -291,7 +470,7 @@ export const streamChat = action({
 
     try {
       for (;;) {
-        const { done, value } = await reader.read();
+        const { done, value } = await source.reader.read();
         if (done) break;
         parser.push(decoder.decode(value, { stream: true }), (text) => {
           pending += text;
@@ -314,13 +493,14 @@ export const streamChat = action({
           ? "The request timed out. Try again or switch to a faster model."
           : `Streaming failed (${error instanceof Error ? error.message : "unknown error"}).`;
     } finally {
+      clearTimeout(timeout);
       try {
-        reader.releaseLock();
+        source.reader.releaseLock();
       } catch {
         // already released
       }
     }
 
-    await finish(streamError ?? undefined);
+    await finish(streamError ?? undefined, servedModel);
   },
 });

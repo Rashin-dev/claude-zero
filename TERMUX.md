@@ -20,6 +20,9 @@ Two ways to use it:
 2. Open the Mythos URL in your browser.
 3. Sign in (email OTP or guest), and paste your free Gemini key
    (`GOOGLE_API_KEY`) into the project's **Keys/API keys** tab once.
+   Optional but recommended: also add `GROQ_API_KEY` — Mythos then
+   automatically falls back to Groq's free tier whenever Gemini is
+   rate-limited or down, so the free quota never stops you.
 
 That's it. This is the zero-cost, zero-maintenance path.
 
@@ -71,6 +74,10 @@ echo "VITE_CONVEX_URL=https://your-project.convex.cloud" > .env.local
 
 # Store the Gemini key server-side
 bunx convex env set GOOGLE_API_KEY "your-free-gemini-key"
+
+# Optional: Groq free tier as automatic fallback when Gemini is
+# rate-limited or down
+bunx convex env set GROQ_API_KEY "your-free-groq-key"
 ```
 
 ### 5. Run it

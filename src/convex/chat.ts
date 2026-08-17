@@ -142,14 +142,16 @@ export const appendChunk = mutation({
 
 /**
  * Mark the assistant message as no longer streaming, optionally with an
- * error message to surface in the UI.
+ * error message to surface in the UI and the model that actually served
+ * the reply (useful when the provider fallback kicked in).
  */
 export const finishMessage = mutation({
   args: {
     messageId: v.id("messages"),
     error: v.optional(v.string()),
+    model: v.optional(v.string()),
   },
-  handler: async (ctx, { messageId, error }) => {
+  handler: async (ctx, { messageId, error, model }) => {
     const user = await getCurrentUser(ctx);
     if (!user) return;
 
@@ -162,7 +164,52 @@ export const finishMessage = mutation({
     await ctx.db.patch(messageId, {
       streaming: false,
       ...(error ? { error } : {}),
+      ...(model ? { model } : {}),
     });
+  },
+});
+
+/**
+ * Count one model request against the user's free-tier quota for a date
+ * (YYYY-MM-DD in UTC). Powers the usage headroom meter in the sidebar.
+ */
+export const recordUsage = mutation({
+  args: { date: v.string() },
+  handler: async (ctx, { date }) => {
+    const user = await getCurrentUser(ctx);
+    if (!user) return;
+
+    const existing = await ctx.db
+      .query("dailyUsage")
+      .withIndex("by_user_date", (q) => q.eq("userId", user._id).eq("date", date))
+      .first();
+    if (existing) {
+      await ctx.db.patch(existing._id, { count: existing.count + 1 });
+    } else {
+      await ctx.db.insert("dailyUsage", {
+        userId: user._id,
+        date,
+        count: 1,
+      });
+    }
+  },
+});
+
+/**
+ * The signed-in user's model-request count for a date (YYYY-MM-DD UTC),
+ * so the UI can show free-tier headroom at a glance.
+ */
+export const getDailyUsage = query({
+  args: { date: v.string() },
+  handler: async (ctx, { date }) => {
+    const user = await getCurrentUser(ctx);
+    if (!user) return null;
+
+    const row = await ctx.db
+      .query("dailyUsage")
+      .withIndex("by_user_date", (q) => q.eq("userId", user._id).eq("date", date))
+      .first();
+    return { count: row?.count ?? 0, date };
   },
 });
 

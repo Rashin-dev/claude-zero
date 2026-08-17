@@ -1,4 +1,6 @@
+import { api } from "@/convex/_generated/api";
 import type { Doc } from "@/convex/_generated/dataModel";
+import { useQuery } from "convex/react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -22,6 +24,7 @@ import {
 import { cn } from "@/lib/utils";
 import {
   Code2,
+  Gauge,
   LogOut,
   MessageSquare,
   MessageSquarePlus,
@@ -47,6 +50,14 @@ export const MODELS = [
     hint: "Fastest",
   },
 ] as const;
+
+// Approximate free-tier daily request cap (Gemini AI Studio free tier).
+// The meter is guidance, not an exact accounting of every provider limit.
+const FREE_DAILY_LIMIT = 1500;
+
+function todayUtc() {
+  return new Date().toISOString().slice(0, 10);
+}
 
 interface SidebarProps {
   conversations: Doc<"conversations">[] | undefined;
@@ -204,6 +215,7 @@ export function Sidebar({
 
       {/* Model + user */}
       <div className="space-y-3 border-t border-sidebar-border p-3">
+        <FreeTierMeter />
         <div className="space-y-1.5">
           <p className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
             <Zap className="size-3" /> Model
@@ -255,6 +267,43 @@ export function Sidebar({
             <LogOut className="size-4" />
           </Button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function FreeTierMeter() {
+  const usage = useQuery(api.chat.getDailyUsage, { date: todayUtc() });
+  const count = usage?.count ?? 0;
+  const pct = Math.min(100, Math.round((count / FREE_DAILY_LIMIT) * 100));
+  const exhausted = pct >= 90;
+  return (
+    <div className="space-y-1.5">
+      <p className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+        <Gauge className="size-3" /> Free tier today
+      </p>
+      <div className="rounded-lg border border-sidebar-border bg-background/40 p-2.5">
+        <div className="flex items-baseline justify-between gap-2">
+          <span className="text-[12px] font-medium tabular-nums">
+            {count}
+            <span className="text-muted-foreground"> / ~{FREE_DAILY_LIMIT}</span>
+          </span>
+          <span className="text-[10.5px] text-muted-foreground">requests</span>
+        </div>
+        <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-muted">
+          <div
+            className={cn(
+              "h-full rounded-full transition-all",
+              exhausted ? "bg-destructive" : "bg-[oklch(0.8_0.11_85)]",
+            )}
+            style={{ width: `${Math.max(pct, 3)}%` }}
+          />
+        </div>
+        <p className="mt-1.5 text-[10.5px] leading-snug text-muted-foreground">
+          {exhausted
+            ? "Daily quota nearly reached — Groq fallback kicks in automatically."
+            : "Auto-fallback to Groq if Gemini is rate-limited."}
+        </p>
       </div>
     </div>
   );

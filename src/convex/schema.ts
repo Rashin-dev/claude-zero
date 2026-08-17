@@ -82,6 +82,16 @@ const schema = defineSchema(
       createdAt: v.number(),
     }).index("by_user", ["userId"]),
 
+    // Per-day model request counter, so the free tier's daily quota is
+    // visible (and never a surprise).
+    dailyUsage: defineTable({
+      userId: v.id("users"),
+      date: v.string(), // YYYY-MM-DD (UTC)
+      count: v.number(),
+    })
+      .index("by_user", ["userId"])
+      .index("by_user_date", ["userId", "date"]),
+
     messages: defineTable({
       conversationId: v.id("conversations"),
       role: v.union(v.literal("user"), v.literal("assistant")),
