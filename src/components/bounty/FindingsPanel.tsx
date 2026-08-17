@@ -15,6 +15,14 @@ import type { Severity } from "@/lib/reportTemplates";
 import { SEVERITY_META } from "@/lib/reportTemplates";
 import { cn } from "@/lib/utils";
 import { Pencil, Plus, Save, ShieldAlert, Trash2 } from "lucide-react";
+
+const FINDING_STATUSES = [
+  { value: "open", label: "Open" },
+  { value: "confirmed", label: "Confirmed" },
+  { value: "false_positive", label: "False positive" },
+  { value: "duplicate", label: "Duplicate" },
+  { value: "fixed", label: "Fixed" },
+] as const;
 import { useEffect, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { toast } from "sonner";
@@ -40,11 +48,13 @@ export function FindingsPanel() {
   const addFinding = useMutation(api.bounty.addFinding);
   const updateFinding = useMutation(api.bounty.updateFinding);
   const deleteFinding = useMutation(api.bounty.deleteFinding);
+  const setFindingStatus = useMutation(api.bounty.setFindingStatus);
 
   const [platform, setPlatform] = useState("hackerone");
   const [programName, setProgramName] = useState("");
   const [scope, setScope] = useState("");
   const [rules, setRules] = useState("");
+  const [learnings, setLearnings] = useState("");
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [finding, setFinding] = useState({ ...EMPTY_FINDING });
@@ -59,6 +69,7 @@ export function FindingsPanel() {
       setProgramName(profile.programName);
       setScope(profile.scope);
       setRules(profile.rules);
+      setLearnings(profile.learnings ?? "");
     }
   }, [profile, profileInit]);
 
@@ -70,7 +81,7 @@ export function FindingsPanel() {
       toast.error("Give the program a name first.");
       return;
     }
-    await saveProfile({ platform, programName, scope, rules });
+    await saveProfile({ platform, programName, scope, rules, learnings });
     toast.success("Program profile saved.");
   };
 
@@ -184,6 +195,20 @@ export function FindingsPanel() {
               placeholder={"Paste the program's rules here:\n- no automated scanning\n- no DoS\n- rate limits..."}
             />
           </div>
+          <div className="space-y-1.5 sm:col-span-2">
+            <Label htmlFor="program-learnings">Learnings (memory)</Label>
+            <Textarea
+              id="program-learnings"
+              value={learnings}
+              onChange={(e) => setLearnings(e.target.value)}
+              rows={3}
+              placeholder={"Lessons from past triage — injected into every agent session:\ne.g. 'login endpoint uses raw SQL — check every auth endpoint for it'"}
+            />
+            <p className="text-[11px] text-muted-foreground">
+              Every bounty session starts knowing this, your scope, rules, and
+              the triage status of past findings — so nothing known is re-tested.
+            </p>
+          </div>
         </div>
         <div className="mt-4 flex items-center gap-2">
           <Button type="button" onClick={handleSaveProfile} className="gap-1.5">
@@ -236,6 +261,26 @@ export function FindingsPanel() {
                       {f.cwe || "CWE not set"} · {meta.label}
                     </p>
                   </div>
+                  <Select
+                    value={f.status ?? "open"}
+                    onValueChange={(value) =>
+                      void setFindingStatus({
+                        findingId: f._id,
+                        status: value,
+                      })
+                    }
+                  >
+                    <SelectTrigger className="h-8 w-[132px] shrink-0 text-[11.5px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {FINDING_STATUSES.map((s) => (
+                        <SelectItem key={s.value} value={s.value}>
+                          {s.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                   <Button
                     type="button"
                     variant="ghost"

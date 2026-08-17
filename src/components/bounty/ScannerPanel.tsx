@@ -127,6 +127,7 @@ const CHECK_TEMPLATES: Record<
 export function ScannerPanel() {
   const passiveRecon = useAction(api.bountyScan.passiveRecon);
   const addFinding = useMutation(api.bounty.addFinding);
+  const recordScan = useMutation(api.bounty.recordScan);
   const [url, setUrl] = useState("");
   const [loading, setLoading] = useState(false);
   const [checks, setChecks] = useState<ScanCheck[] | null>(null);
@@ -145,6 +146,18 @@ export function ScannerPanel() {
       const result = await passiveRecon({ url: target });
       setChecks(result.checks);
       setLastUrl(result.host);
+      // Persist for the hunt dashboard (best effort).
+      try {
+        await recordScan({
+          url: target,
+          host: result.host,
+          failCount: result.checks.filter((c) => c.status === "fail").length,
+          warnCount: result.checks.filter((c) => c.status === "warn").length,
+          checks: result.checks,
+        });
+      } catch {
+        // dashboard history is best-effort
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Scan failed.");
     } finally {

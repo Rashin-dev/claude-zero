@@ -48,6 +48,7 @@ const schema = defineSchema(
       programName: v.string(),
       scope: v.string(),
       rules: v.string(),
+      learnings: v.optional(v.string()),
       updatedAt: v.number(),
     }).index("by_user", ["userId"]),
 
@@ -61,6 +62,23 @@ const schema = defineSchema(
       impact: v.string(),
       reproduction: v.string(),
       remediation: v.string(),
+      status: v.optional(v.string()), // open | confirmed | false_positive | duplicate | fixed
+      createdAt: v.number(),
+    }).index("by_user", ["userId"]),
+
+    bountyScans: defineTable({
+      userId: v.id("users"),
+      url: v.string(),
+      host: v.string(),
+      failCount: v.number(),
+      warnCount: v.number(),
+      checks: v.array(
+        v.object({
+          check: v.string(),
+          status: v.string(),
+          detail: v.string(),
+        }),
+      ),
       createdAt: v.number(),
     }).index("by_user", ["userId"]),
 

@@ -36,8 +36,9 @@ export const saveProfile = mutation({
     programName: v.string(),
     scope: v.string(),
     rules: v.string(),
+    learnings: v.optional(v.string()),
   },
-  handler: async (ctx, { platform, programName, scope, rules }) => {
+  handler: async (ctx, { platform, programName, scope, rules, learnings }) => {
     const user = await getCurrentUser(ctx);
     if (!user) throw new Error("Not signed in");
 
@@ -51,6 +52,7 @@ export const saveProfile = mutation({
       programName,
       scope,
       rules,
+      learnings: learnings ?? "",
       updatedAt: Date.now(),
     };
 
@@ -91,13 +93,16 @@ export const addFinding = mutation({
     impact: v.string(),
     reproduction: v.string(),
     remediation: v.string(),
+    status: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const user = await getCurrentUser(ctx);
     if (!user) throw new Error("Not signed in");
+    const { status, ...rest } = args;
     return await ctx.db.insert("bountyFindings", {
       userId: user._id,
-      ...args,
+      ...rest,
+      status: status ?? "open",
       createdAt: Date.now(),
     });
   },
@@ -127,6 +132,71 @@ export const updateFinding = mutation({
       throw new Error("Finding not found");
     }
     await ctx.db.patch(findingId, fields);
+  },
+});
+
+/**
+ * Quick triage: flip a finding's status (open / confirmed / false_positive /
+ * duplicate / fixed) without rewriting the whole finding.
+ */
+export const setFindingStatus = mutation({
+  args: {
+    findingId: v.id("bountyFindings"),
+    status: v.string(),
+  },
+  handler: async (ctx, { findingId, status }) => {
+    const user = await getCurrentUser(ctx);
+    if (!user) throw new Error("Not signed in");
+
+    const finding = await ctx.db.get(findingId);
+    if (!finding || finding.userId !== user._id) {
+      throw new Error("Finding not found");
+    }
+    await ctx.db.patch(findingId, { status });
+  },
+});
+
+/**
+ * Persist a completed passive scan so it shows up in the hunt dashboard.
+ */
+export const recordScan = mutation({
+  args: {
+    url: v.string(),
+    host: v.string(),
+    failCount: v.number(),
+    warnCount: v.number(),
+    checks: v.array(
+      v.object({
+        check: v.string(),
+        status: v.string(),
+        detail: v.string(),
+      }),
+    ),
+  },
+  handler: async (ctx, args) => {
+    const user = await getCurrentUser(ctx);
+    if (!user) throw new Error("Not signed in");
+    await ctx.db.insert("bountyScans", {
+      userId: user._id,
+      ...args,
+      createdAt: Date.now(),
+    });
+  },
+});
+
+/**
+ * Recent passive scans for the signed-in user, newest first.
+ */
+export const listScans = query({
+  args: {},
+  handler: async (ctx) => {
+    const user = await getCurrentUser(ctx);
+    if (!user) return [];
+    return await ctx.db
+      .query("bountyScans")
+      .withIndex("by_user", (q) => q.eq("userId", user._id))
+      .order("desc")
+      .take(25);
   },
 });
 

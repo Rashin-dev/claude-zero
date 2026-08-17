@@ -150,8 +150,47 @@ export const streamChat = action({
       return;
     }
 
-    const systemInstruction =
+    let systemInstruction =
       SYSTEM_PROMPTS[context.mode] ?? SYSTEM_PROMPTS.chat;
+
+    // Learning mode: every bounty session starts knowing the program's
+    // scope, rules, saved learnings, and the triage state of past findings,
+    // so the agent doesn't re-test known/confirmed/fixed issues.
+    if (context.mode === "bounty") {
+      const [profile, findings] = await Promise.all([
+        ctx.runQuery(api.bounty.getProfile),
+        ctx.runQuery(api.bounty.listFindings),
+      ]);
+      const parts: string[] = [];
+      if (profile) {
+        parts.push(
+          `DECLARED SCOPE (authoritative — only these targets may be discussed):\n${profile.scope.slice(0, 1500)}`,
+        );
+        parts.push(
+          `PROGRAM RULES OF ENGAGEMENT (authoritative):\n${profile.rules.slice(0, 1500)}`,
+        );
+        if (profile.learnings) {
+          parts.push(
+            `LEARNINGS FROM PREVIOUS TRIAGE (treat as lessons):\n${profile.learnings.slice(0, 800)}`,
+          );
+        }
+      }
+      if (findings && findings.length > 0) {
+        const summary = findings
+          .slice(0, 25)
+          .map(
+            (f) =>
+              `- [${f.status ?? "open"}] (${f.severity}) ${f.title}`,
+          )
+          .join("\n");
+        parts.push(
+          `PREVIOUS FINDINGS AND TRIAGE STATUS (do not re-test confirmed, duplicate, or fixed issues; learn from false positives):\n${summary}`,
+        );
+      }
+      if (parts.length > 0) {
+        systemInstruction += `\n\n--- PROGRAM CONTEXT (from the user's saved profile; authoritative) ---\n${parts.join("\n\n")}`;
+      }
+    }
 
     const contents = context.messages
       .filter(
