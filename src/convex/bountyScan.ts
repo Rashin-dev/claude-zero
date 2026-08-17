@@ -13,6 +13,8 @@ export interface ScanCheck {
   detail: string;
 }
 
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
 /**
  * Passive, read-only reconnaissance of a target URL (the "Psychic"-style
  * fingerprint step). Enforces that the target host is inside the scope saved
@@ -73,6 +75,22 @@ export const passiveRecon = action({
       detail: `HTTP ${base.status} (${base.finalUrl})`,
     });
 
+    if (base.status === 429) {
+      checks.push({
+        check: "WAF / rate limiting",
+        status: "warn",
+        detail:
+          "HTTP 429 on the very first request — the WAF is already throttling you. Slow down and respect the program's rate limits before going further.",
+      });
+    } else if (base.status === 403) {
+      checks.push({
+        check: "WAF / access block",
+        status: "warn",
+        detail:
+          "HTTP 403 — the WAF may be blocking this IP (common for datacenter/cloud IPs). Check the program's rules about allowed testing IPs; do not try to evade the block.",
+      });
+    }
+
     const server = headers["server"];
     checks.push({
       check: "Server banner",
@@ -130,7 +148,8 @@ export const passiveRecon = action({
         : "No Referrer-Policy — sensitive URLs can leak in the Referer header.",
     });
 
-    // 2. robots.txt
+    // 2. robots.txt — spaced politely; the WAF is watching, so we are too.
+    await sleep(400);
     try {
       const robots = await get(`${origin}/robots.txt`, 15_000);
       if (robots.status === 200 && robots.text.trim()) {
@@ -163,6 +182,7 @@ export const passiveRecon = action({
     }
 
     // 3. sitemap presence (read-only existence check)
+    await sleep(400);
     try {
       const sitemap = await get(`${origin}/sitemap.xml`, 15_000);
       checks.push({
