@@ -281,6 +281,14 @@ export const streamChat = action({
   handler: async (ctx, { conversationId, assistantMessageId, model }) => {
     const finish = async (error?: string, servedModel?: string) => {
       try {
+        await ctx.runMutation(api.chat.setMessageStatus, {
+          messageId: assistantMessageId,
+          status: undefined,
+        });
+      } catch {
+        // best effort
+      }
+      try {
         await ctx.runMutation(api.chat.finishMessage, {
           messageId: assistantMessageId,
           error,
@@ -447,11 +455,41 @@ export const streamChat = action({
         }
       }
       if (!source && attempt < MAX_ATTEMPTS - 1) {
+        // Honor the Stop button even during retries: if the user clicked
+        // Stop while providers were failing, bail out now instead of
+        // grinding through the remaining backoff.
+        const canceled = await ctx.runQuery(
+          internal.chat.isMessageCanceled,
+          { messageId: assistantMessageId },
+        );
+        if (canceled) {
+          await finish();
+          return;
+        }
+        // Surface which retry we're on so the UI never looks frozen.
+        try {
+          await ctx.runMutation(api.chat.setMessageStatus, {
+            messageId: assistantMessageId,
+            status: `retry:${attempt + 1}/${MAX_ATTEMPTS}`,
+          });
+        } catch {
+          // best effort
+        }
         // Exponential backoff: each retry waits longer than the last.
         await sleep(Math.min(1000 * 2 ** attempt, 8000));
       }
     }
     clearTimeout(timeout);
+
+    // A provider accepted the request; switch the UI to the streaming state.
+    try {
+      await ctx.runMutation(api.chat.setMessageStatus, {
+        messageId: assistantMessageId,
+        status: "streaming",
+      });
+    } catch {
+      // best effort
+    }
 
     if (!source) {
       await finish(

@@ -233,6 +233,27 @@ export const stopGeneration = mutation({
 });
 
 /**
+ * Update the transient status shown next to a streaming assistant message
+ * (e.g. "retry:3/10" while providers are rate-limited). Passing undefined
+ * clears the status. Only the message owner can change it.
+ */
+export const setMessageStatus = mutation({
+  args: { messageId: v.id("messages"), status: v.optional(v.string()) },
+  handler: async (ctx, { messageId, status }) => {
+    const user = await getCurrentUser(ctx);
+    if (!user) return;
+
+    const message = await ctx.db.get(messageId);
+    if (!message) return;
+
+    const conversation = await ctx.db.get(message.conversationId);
+    if (!conversation || conversation.userId !== user._id) return;
+
+    await ctx.db.patch(messageId, { status });
+  },
+});
+
+/**
  * Internal: load everything the streaming action needs to build the prompt
  * and verify ownership. Returns null when the conversation is missing or
  * doesn't belong to the signed-in user.

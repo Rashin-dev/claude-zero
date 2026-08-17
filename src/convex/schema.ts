@@ -100,6 +100,9 @@ const schema = defineSchema(
       streaming: v.optional(v.boolean()),
       canceled: v.optional(v.boolean()),
       error: v.optional(v.string()),
+      // Transient streaming state shown to the user (e.g. "retry:3/10").
+      // Cleared when the message finishes or starts streaming content.
+      status: v.optional(v.string()),
       createdAt: v.number(),
     }).index("by_conversation", ["conversationId"]),
   },

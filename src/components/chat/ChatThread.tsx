@@ -1,10 +1,13 @@
+import { Button } from "@/components/ui/button";
 import type { Doc } from "@/convex/_generated/dataModel";
 import {
   Code2,
   FileSearch,
   KeyRound,
   Link2,
+  Loader2,
   MessageSquare,
+  RefreshCw,
   ShieldAlert,
   Sparkles,
   Wand2,
@@ -54,12 +57,28 @@ function ThinkingDots() {
   );
 }
 
+function RetryStatus({ status }: { status: string }) {
+  const match = /^retry:(\d+)\/(\d+)$/.exec(status);
+  const attempt = match?.[1] ?? "…";
+  const total = match?.[2] ?? "…";
+  return (
+    <span className="inline-flex items-center gap-2 rounded-full border border-[oklch(0.78_0.13_55/35%)] bg-[oklch(0.78_0.13_55/8%)] px-3 py-1.5">
+      <Loader2 className="size-3 animate-spin text-[oklch(0.78_0.13_55)]" />
+      <span className="text-[11.5px] text-[oklch(0.78_0.13_55)]">
+        free providers rate-limited — retrying {attempt}/{total}…
+      </span>
+    </span>
+  );
+}
+
 function MessageItem({
   message,
   isStreaming,
+  onSend,
 }: {
   message: Doc<"messages">;
   isStreaming: boolean;
+  onSend: (prompt: string) => void;
 }) {
   if (message.role === "user") {
     return (
@@ -72,6 +91,10 @@ function MessageItem({
   }
 
   const showThinking = isStreaming && message.content.length === 0;
+  const retryStatus =
+    message.status?.startsWith("retry:") && showThinking
+      ? message.status
+      : null;
 
   return (
     <div className="flex items-start gap-3">
@@ -80,9 +103,25 @@ function MessageItem({
       </div>
       <div className="min-w-0 flex-1">
         {message.error ? (
-          <div className="rounded-xl border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm leading-relaxed text-destructive">
-            {message.error}
+          <div>
+            <div className="rounded-xl border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm leading-relaxed text-destructive">
+              {message.error}
+            </div>
+            {!isStreaming && !message.content && (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => onSend("continue")}
+                className="mt-2 gap-1.5 border-[oklch(0.8_0.11_85/40%)] text-[oklch(0.8_0.11_85)] hover:bg-[oklch(0.8_0.11_85/10%)]"
+              >
+                <RefreshCw className="size-3.5" />
+                Continue
+              </Button>
+            )}
           </div>
+        ) : retryStatus ? (
+          <RetryStatus status={retryStatus} />
         ) : showThinking ? (
           <ThinkingDots />
         ) : message.content ? (
@@ -240,6 +279,7 @@ export function ChatThread({
               key={message._id}
               message={message}
               isStreaming={message.streaming === true}
+              onSend={onSend}
             />
           ))}
         </div>
