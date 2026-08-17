@@ -3,10 +3,12 @@ import {
   Code2,
   FileSearch,
   KeyRound,
+  Link2,
   MessageSquare,
   ShieldAlert,
   Sparkles,
   Wand2,
+  Wrench,
 } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { Markdown } from "./Markdown";
@@ -123,6 +125,24 @@ const BOUNTY_SUGGESTIONS = [
     label: "Audit rules check",
     prompt:
       "List the most common bug bounty rules of engagement and check my program's rules against them so I don't violate anything.",
+  },
+  {
+    icon: FileSearch,
+    label: "Analyze code",
+    prompt:
+      "Here is a source file. Analyze it like a static-analysis tool and produce a prioritized risk map: file/function, the risky pattern, why it matters, and the concrete fix for each.",
+  },
+  {
+    icon: Link2,
+    label: "Chain findings",
+    prompt:
+      "Given the findings I've recorded, which of them can be chained into a higher-impact scenario, and what is the minimal non-destructive proof of concept for that chain?",
+  },
+  {
+    icon: Wrench,
+    label: "Write the fixes",
+    prompt:
+      "For each of my recorded findings, write the concrete remediation code a developer should apply, with a one-line explanation each.",
   },
 ];
 

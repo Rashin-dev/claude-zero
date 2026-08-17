@@ -2,13 +2,15 @@ import type { Doc } from "@/convex/_generated/dataModel";
 import { ChatThread } from "@/components/chat/ChatThread";
 import { Composer } from "@/components/chat/Composer";
 import { cn } from "@/lib/utils";
-import { FileSearch, FileText, ShieldAlert } from "lucide-react";
+import { FileSearch, FileText, Radar, ShieldAlert } from "lucide-react";
 import { useState } from "react";
 import { FindingsPanel } from "./FindingsPanel";
 import { ReportPanel } from "./ReportPanel";
+import { ScannerPanel } from "./ScannerPanel";
 
 const TABS = [
   { value: "agent", label: "Agent", icon: ShieldAlert },
+  { value: "scan", label: "Scan", icon: Radar },
   { value: "findings", label: "Findings", icon: FileSearch },
   { value: "report", label: "Report", icon: FileText },
 ] as const;
@@ -71,6 +73,11 @@ export function BountyWorkspace({
             onStop={onStop}
           />
         </>
+      )}
+      {tab === "scan" && (
+        <div className="flex-1 overflow-y-auto">
+          <ScannerPanel />
+        </div>
       )}
       {tab === "findings" && (
         <div className="flex-1 overflow-y-auto">
