@@ -98,7 +98,22 @@ tokens. That makes the interception points:
 
 ---
 
-## 4. Device-side runbook (the only steps that need hardware)
+## 4. Confirmed baseline evidence
+
+| Field | Value |
+|---|---|
+| Transaction ID | `60180817-c5f0-4f92-ad45-88272b8d40ad` |
+| Process ID | `d3e34d38-24b7-4d30-a773-13597a9015cf` |
+| Capture result | **Legitimate liveness accepted** (control/baseline) |
+| Date | 2026-08-18 |
+| Researcher | bug_assembly |
+
+This is the **control** — engine correctly accepted a live human. Every attack
+attempt below is compared against this baseline.
+
+---
+
+## 5. Device-side runbook (the only steps that need hardware)
 
 **Blocked from server environment:** `sdk-h1.unico.io` is behind a Cloudflare managed
 challenge (all requests from datacenter IPs → 403 "Just a moment…"). The capture flow
@@ -159,3 +174,84 @@ provide account name ≤12 chars + responsible person details):
 
 With a token you can test: process creation, result/selfie/evidence retrieval, IDOR
 between tenants, `Token-Shuri` replay, and the tokeninfo introspection endpoint.
+
+---
+
+## 9. Evidence log — fill in per attempt
+
+Copy the block below for every test attempt. Paste completed blocks back to Mythos
+for automatic report assembly.
+
+```
+=== EVIDENCE ENTRY ===
+Date:
+Researcher: bug_assembly
+Platform: sdk-h1.unico.io (web)
+
+TEST CLASS: [Photo Attack | Video Replay | 3D Mask | Deepfake | Memory Manipulation | Template Injection | Timing Attack | Capture Relay | Stream Manipulation | Session Hijacking]
+
+TRANSACTION ID:
+PROCESS ID:
+
+ATTEMPT #: __ / 100 (photo) or __ / 10 (other)
+
+PRESENTATION METHOD:
+[e.g., printed A4 photo on screen, iPhone video playback, OBS virtual camera, Mitmproxy intercept]
+
+SDK RESULT: [LIVENESS ACCEPTED ✅ | LIVENESS REJECTED ❌ | ERROR ⚠️]
+
+TIMESTAMP (local):
+
+ADDITIONAL NOTES:
+[e.g., lighting conditions, browser used, distance from camera]
+
+=== END ENTRY ===
+```
+
+**Threshold to report (from program policy):**
+| Matrix class | Success threshold | Our baseline |
+|---|---|---|
+| Photo Attack | >1% acceptance over 100 attempts | 60180817 / d3e34d38 (legitimate ✅) |
+| Video Replay | Accepted on 3+ different samples | — |
+| 3D Mask/Model | >5% success rate | — |
+| Deepfake | Real-time bypass <500ms | — |
+| Memory Manipulation | Persists across engine restarts | — |
+| Template Injection | Works on multiple formats | — |
+| Timing Attack | Reproducible >50% | — |
+| Capture Relay | Works across sessions | — |
+| Stream Manipulation | Undetected | — |
+| Session Hijacking | State copyable between instances | — |
+
+**Report template (ready to fill when threshold hit):**
+```
+# [Matrix class] — Unico Liveness SDK bypasses [attack type]
+
+**Weakness:** [CWE-XXX]
+**Severity:** [via OWASP Risk Rating calculator]
+**Program:** Unico | **Platform:** HackerOne
+**Researcher:** bug_assembly
+
+## Summary
+The Unico liveness SDK (web) accepted a [photo/video/3D mask/deepfake] presentation
+attack in X out of Y attempts, exceeding the program's published threshold of [threshold].
+
+**Transaction ID:** [from entry]
+**Process ID:** [from entry]
+
+## Impact
+An attacker can bypass biometric identity verification without a live human,
+defeating the purpose of liveness checks in onboarding, KYC, payments, or
+account recovery flows that rely on Unico's SDK.
+
+## Steps To Reproduce
+1. Navigate to https://sdk-h1.unico.io/ (any modern browser with camera).
+2. [Exact attack steps — what was presented, how, tools used]
+3. Observe SDK returns positive liveness result.
+4. Repeat: X attempts total, Y accepted.
+
+## Evidence
+- Transaction ID: [ID]
+- Process ID: [ID]
+- [Screenshots / video recordings of the attack]
+- [Evidence log entries N-M from this playbook]
+```
